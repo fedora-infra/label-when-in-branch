@@ -1,0 +1,26 @@
+name: "Label when in branch"
+description:
+  "A Github action to label issues and PRs that are committed to a certain
+  branch."
+author: "Aurelien Bompard <aurelien@bompard.org>"
+
+inputs:
+  label:
+    description: "The label to apply"
+    required: true
+    default: "deployed"
+  branch:
+    description: "The branch to check"
+    required: true
+    default: "deployment"
+  token:
+    description: "The Github Token"
+    required: true
+
+branding:
+  icon: tag
+  color: purple
+
+runs:
+  using: "node16"
+  main: "dist/index.js"
