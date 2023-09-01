@@ -59,6 +59,14 @@ because I assume bots do not care whether their work has been deployed, but I
 may be hurting their feelings by thinking that. If you want to label bots'
 issues and PRs, add the `exclude_bots: false` option to the `with:` block.
 
+## Development
+
+This action is written in TypeScript. The TypeScript code is compiled into
+Javascript on commit using the `npm run on-commit` command, because Github only
+understands Javascript. You can use [pre-commit](https://pre-commit.com/) to do
+this build for you on commit, just install it and run `pre-commit install` in
+the repo.
+
 ## License
 
 This code is copyright Aurélien Bompard <`aurelien@bompard.org`> and is licensed
