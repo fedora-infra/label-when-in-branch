@@ -60,7 +60,7 @@ export async function run(): Promise<void> {
         ...reqArgs,
         commit_sha: github.context.sha
       })
-    const pullRequests = pullRequestsResponse.data.map(pr => pr.id)
+    const pullRequests = pullRequestsResponse.data.map(pr => pr.number)
     core.debug(`PRs: ${JSON.stringify(pullRequests)}`)
 
     const closedIssues: number[] = github.context.payload.commits

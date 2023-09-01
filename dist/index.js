@@ -9708,7 +9708,7 @@ async function run() {
             ...reqArgs,
             commit_sha: github.context.sha
         });
-        const pullRequests = pullRequestsResponse.data.map(pr => pr.id);
+        const pullRequests = pullRequestsResponse.data.map(pr => pr.number);
         core.debug(`PRs: ${JSON.stringify(pullRequests)}`);
         const closedIssues = github.context.payload.commits
             .map((commit) => getClosedIssues(commit.message))
