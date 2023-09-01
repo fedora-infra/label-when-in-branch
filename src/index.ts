@@ -72,6 +72,20 @@ export async function run(): Promise<void> {
       ...new Set([...pullRequests, ...closedIssues])
     ]
 
+    if (applyLabelOn.length === 0) {
+      return
+    }
+
+    const existingLabels = (
+      await octokit.rest.issues.listLabelsForRepo({ ...reqArgs })
+    ).data.map(l => l.name)
+    if (!existingLabels.includes(label)) {
+      await octokit.rest.issues.createLabel({
+        ...reqArgs,
+        name: label
+      })
+    }
+
     for (const issueOrPR of applyLabelOn) {
       core.info(`Applying label "${label}" on #${issueOrPR}`)
       try {
