@@ -16,6 +16,9 @@ inputs:
   token:
     description: "The Github Token"
     required: true
+  exclude_bots:
+    description: "Do not act on issues and PRs created by bots"
+    default: "true"
 
 branding:
   icon: tag

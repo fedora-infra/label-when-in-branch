@@ -1,9 +1,19 @@
 import * as core from "@actions/core"
 import * as github from "@actions/github"
 
+interface User {
+  email: string
+  name: string
+  username: string
+}
 interface Commit {
   message: string
   id: string
+  tree_id: string
+  timestamp: string
+  url: string
+  author: User
+  committer: User
 }
 
 const CLOSE_KEYWORDS = [
@@ -42,8 +52,8 @@ export async function run(): Promise<void> {
       return
     }
     const label = core.getInput("label")
-
     const token = core.getInput("token")
+    const excludeBots = core.getInput("exclude_bots")
     const octokit = github.getOctokit(token)
 
     // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
@@ -68,6 +78,11 @@ export async function run(): Promise<void> {
     // });
     for (const commit of github.context.payload.commits) {
       core.debug(JSON.stringify(commit))
+
+      if (excludeBots && commit.author.username.endsWith("[bot]")) {
+        continue
+      }
+
       const pullRequestsResponse =
         await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
           ...reqArgs,

@@ -9697,6 +9697,7 @@ async function run() {
         }
         const label = core.getInput("label");
         const token = core.getInput("token");
+        const excludeBots = core.getInput("exclude_bots");
         const octokit = github.getOctokit(token);
         // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
         core.debug(`Applying label "${label}" to issues and PRs committed in ${branch} ...`);
@@ -9715,6 +9716,9 @@ async function run() {
         // });
         for (const commit of github.context.payload.commits) {
             core.debug(JSON.stringify(commit));
+            if (excludeBots && commit.author.username.endsWith("[bot]")) {
+                continue;
+            }
             const pullRequestsResponse = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
                 ...reqArgs,
                 commit_sha: commit.id
