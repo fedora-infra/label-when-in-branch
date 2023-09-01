@@ -9704,16 +9704,32 @@ async function run() {
             owner: github.context.repo.owner,
             repo: github.context.repo.repo
         };
-        const pullRequestsResponse = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
-            ...reqArgs,
-            commit_sha: github.context.sha
-        });
-        const pullRequests = pullRequestsResponse.data.map(pr => pr.number);
+        let pullRequests = [];
+        let closedIssues = [];
+        // octokit.paginate(octokit.rest.repos.compareCommitsWithBasehead, {
+        //   ...reqArgs,
+        //   basehead: `${github.context.}`,
+        // })
+        // .then((issues) => {
+        //   // issues is an array of all issue objects
+        // });
+        for (const commit of github.context.payload.commits) {
+            core.debug(JSON.stringify(commit));
+            const pullRequestsResponse = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+                ...reqArgs,
+                commit_sha: commit.id
+            });
+            pullRequests = [
+                ...pullRequests,
+                ...pullRequestsResponse.data.map(pr => pr.number)
+            ];
+            closedIssues = [
+                ...closedIssues,
+                ...getClosedIssues(commit.message)
+            ];
+        }
         core.debug(`PRs: ${JSON.stringify(pullRequests)}`);
-        const closedIssues = github.context.payload.commits
-            .map((commit) => getClosedIssues(commit.message))
-            .flat();
-        core.debug(`Closed Commits: ${JSON.stringify(closedIssues)}`);
+        core.debug(`Closed issues: ${JSON.stringify(closedIssues)}`);
         const applyLabelOn = [
             ...new Set([...pullRequests, ...closedIssues])
         ];

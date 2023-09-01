@@ -3,6 +3,7 @@ import * as github from "@actions/github"
 
 interface Commit {
   message: string
+  id: string
 }
 
 const CLOSE_KEYWORDS = [
@@ -55,18 +56,35 @@ export async function run(): Promise<void> {
       repo: github.context.repo.repo
     }
 
-    const pullRequestsResponse =
-      await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
-        ...reqArgs,
-        commit_sha: github.context.sha
-      })
-    const pullRequests = pullRequestsResponse.data.map(pr => pr.number)
-    core.debug(`PRs: ${JSON.stringify(pullRequests)}`)
+    let pullRequests: number[] = []
+    let closedIssues: number[] = []
 
-    const closedIssues: number[] = github.context.payload.commits
-      .map((commit: Commit) => getClosedIssues(commit.message))
-      .flat()
-    core.debug(`Closed Commits: ${JSON.stringify(closedIssues)}`)
+    // octokit.paginate(octokit.rest.repos.compareCommitsWithBasehead, {
+    //   ...reqArgs,
+    //   basehead: `${github.context.}`,
+    // })
+    // .then((issues) => {
+    //   // issues is an array of all issue objects
+    // });
+    for (const commit of github.context.payload.commits) {
+      core.debug(JSON.stringify(commit))
+      const pullRequestsResponse =
+        await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+          ...reqArgs,
+          commit_sha: (commit as Commit).id
+        })
+      pullRequests = [
+        ...pullRequests,
+        ...pullRequestsResponse.data.map(pr => pr.number)
+      ]
+      closedIssues = [
+        ...closedIssues,
+        ...getClosedIssues((commit as Commit).message)
+      ]
+    }
+
+    core.debug(`PRs: ${JSON.stringify(pullRequests)}`)
+    core.debug(`Closed issues: ${JSON.stringify(closedIssues)}`)
 
     const applyLabelOn: number[] = [
       ...new Set([...pullRequests, ...closedIssues])
