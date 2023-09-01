@@ -1,20 +1,6 @@
 import * as core from "@actions/core"
 import * as github from "@actions/github"
-
-interface User {
-  email: string
-  name: string
-  username: string
-}
-interface Commit {
-  message: string
-  id: string
-  tree_id: string
-  timestamp: string
-  url: string
-  author: User
-  committer: User
-}
+import type { PushEvent } from "@octokit/webhooks-definitions/schema"
 
 const CLOSE_KEYWORDS = [
   "close",
@@ -51,6 +37,7 @@ export async function run(): Promise<void> {
       core.debug(`Skipping branch ${github.context.ref.substring(11)}`)
       return
     }
+
     const label = core.getInput("label")
     const token = core.getInput("token")
     const excludeBots = core.getInput("exclude_bots")
@@ -66,36 +53,38 @@ export async function run(): Promise<void> {
       repo: github.context.repo.repo
     }
 
+    const pushPayload = github.context.payload as PushEvent
+
     let pullRequests: number[] = []
     let closedIssues: number[] = []
 
-    // octokit.paginate(octokit.rest.repos.compareCommitsWithBasehead, {
-    //   ...reqArgs,
-    //   basehead: `${github.context.}`,
-    // })
-    // .then((issues) => {
-    //   // issues is an array of all issue objects
-    // });
-    for (const commit of github.context.payload.commits) {
-      core.debug(JSON.stringify(commit))
-
-      if (excludeBots && commit.author.username.endsWith("[bot]")) {
-        continue
+    // Don't use github.context.payload.commits because it's limited to 20 entries.
+    for await (const response of octokit.paginate.iterator(
+      octokit.rest.repos.compareCommitsWithBasehead,
+      {
+        ...reqArgs,
+        basehead: `${pushPayload.before}...${pushPayload.after}`
       }
+    )) {
+      for (const commit of response.data.commits) {
+        if (excludeBots && commit.author && commit.author.type === "Bot") {
+          continue
+        }
 
-      const pullRequestsResponse =
-        await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
-          ...reqArgs,
-          commit_sha: (commit as Commit).id
-        })
-      pullRequests = [
-        ...pullRequests,
-        ...pullRequestsResponse.data.map(pr => pr.number)
-      ]
-      closedIssues = [
-        ...closedIssues,
-        ...getClosedIssues((commit as Commit).message)
-      ]
+        const pullRequestsResponse =
+          await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+            ...reqArgs,
+            commit_sha: commit.sha
+          })
+        pullRequests = [
+          ...pullRequests,
+          ...pullRequestsResponse.data.map(pr => pr.number)
+        ]
+        closedIssues = [
+          ...closedIssues,
+          ...getClosedIssues(commit.commit.message)
+        ]
+      }
     }
 
     core.debug(`PRs: ${JSON.stringify(pullRequests)}`)

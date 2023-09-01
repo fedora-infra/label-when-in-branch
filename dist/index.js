@@ -9705,32 +9705,31 @@ async function run() {
             owner: github.context.repo.owner,
             repo: github.context.repo.repo
         };
+        const pushPayload = github.context.payload;
         let pullRequests = [];
         let closedIssues = [];
-        // octokit.paginate(octokit.rest.repos.compareCommitsWithBasehead, {
-        //   ...reqArgs,
-        //   basehead: `${github.context.}`,
-        // })
-        // .then((issues) => {
-        //   // issues is an array of all issue objects
-        // });
-        for (const commit of github.context.payload.commits) {
-            core.debug(JSON.stringify(commit));
-            if (excludeBots && commit.author.username.endsWith("[bot]")) {
-                continue;
+        // Don't use github.context.payload.commits because it's limited to 20 entries.
+        for await (const response of octokit.paginate.iterator(octokit.rest.repos.compareCommitsWithBasehead, {
+            ...reqArgs,
+            basehead: `${pushPayload.before}...${pushPayload.after}`
+        })) {
+            for (const commit of response.data.commits) {
+                if (excludeBots && commit.author && commit.author.type === "Bot") {
+                    continue;
+                }
+                const pullRequestsResponse = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+                    ...reqArgs,
+                    commit_sha: commit.sha
+                });
+                pullRequests = [
+                    ...pullRequests,
+                    ...pullRequestsResponse.data.map(pr => pr.number)
+                ];
+                closedIssues = [
+                    ...closedIssues,
+                    ...getClosedIssues(commit.commit.message)
+                ];
             }
-            const pullRequestsResponse = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
-                ...reqArgs,
-                commit_sha: commit.id
-            });
-            pullRequests = [
-                ...pullRequests,
-                ...pullRequestsResponse.data.map(pr => pr.number)
-            ];
-            closedIssues = [
-                ...closedIssues,
-                ...getClosedIssues(commit.message)
-            ];
         }
         core.debug(`PRs: ${JSON.stringify(pullRequests)}`);
         core.debug(`Closed issues: ${JSON.stringify(closedIssues)}`);
