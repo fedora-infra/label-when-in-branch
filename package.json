@@ -1,7 +1,7 @@
 {
     "name": "label-when-in-branch",
     "description": "A Github action to label issues and PRs that are committed to a certain branch.",
-    "version": "0.0.1",
+    "version": "1.0",
     "homepage": "https://github.com/abompard/label-when-in-branch",
     "repository": {
         "type": "git",
