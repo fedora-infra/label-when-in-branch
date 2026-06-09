@@ -1,6 +1,6 @@
 import * as core from "@actions/core"
 import * as github from "@actions/github"
-import type { PushEvent } from "@octokit/webhooks-definitions/schema"
+import type { PushEvent } from "@octokit/webhooks-types"
 
 const CLOSE_KEYWORDS = [
   "close",
@@ -129,5 +129,4 @@ export async function run(): Promise<void> {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-floating-promises
 run()
