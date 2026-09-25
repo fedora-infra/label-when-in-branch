@@ -14,11 +14,15 @@ inputs:
     required: true
     default: "deployment"
   token:
-    description: "The Github Token"
+    description: "The Github/Forgejo Token"
     required: true
   exclude_bots:
     description: "Do not act on issues and PRs created by bots"
     default: "true"
+  server_type:
+    description: "Server type ('github' or 'forgejo' / 'gitea'). Defaults to auto-detect."
+    required: false
+    default: "auto"
 
 branding:
   icon: tag

@@ -1882,7 +1882,6 @@ class Context {
         this.action = process.env.GITHUB_ACTION;
         this.actor = process.env.GITHUB_ACTOR;
         this.job = process.env.GITHUB_JOB;
-        this.runAttempt = parseInt(process.env.GITHUB_RUN_ATTEMPT, 10);
         this.runNumber = parseInt(process.env.GITHUB_RUN_NUMBER, 10);
         this.runId = parseInt(process.env.GITHUB_RUN_ID, 10);
         this.apiUrl = (_a = process.env.GITHUB_API_URL) !== null && _a !== void 0 ? _a : `https://api.github.com`;
@@ -29999,7 +29998,16 @@ async function run() {
         const label = core.getInput("label");
         const token = core.getInput("token");
         const excludeBots = core.getInput("exclude_bots");
-        const octokit = github.getOctokit(token);
+        const serverTypeInput = (core.getInput("server_type") || "auto").toLowerCase();
+        const serverUrl = process.env.GITHUB_SERVER_URL || "";
+        const isForgejo = serverTypeInput === "forgejo" ||
+            serverTypeInput === "gitea" ||
+            (serverTypeInput === "auto" &&
+                (Boolean(process.env.GITEA_ACTIONS) ||
+                    (serverUrl !== "" && !serverUrl.includes("github.com"))));
+        core.info(`Running in ${isForgejo ? "Forgejo/Gitea" : "GitHub"} mode.`);
+        const baseUrl = process.env.GITHUB_API_URL;
+        const octokit = github.getOctokit(token, baseUrl ? { baseUrl } : undefined);
         // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
         core.debug(`Applying label "${label}" to issues and PRs committed in ${branch} ...`);
         const reqArgs = {
@@ -30009,27 +30017,93 @@ async function run() {
         const pushPayload = github.context.payload;
         let pullRequests = [];
         let closedIssues = [];
-        // Don't use github.context.payload.commits because it's limited to 20 entries.
-        for await (const response of octokit.paginate.iterator(octokit.rest.repos.compareCommitsWithBasehead, {
-            ...reqArgs,
-            basehead: `${pushPayload.before}...${pushPayload.after}`
-        })) {
-            for (const commit of response.data.commits) {
-                if (excludeBots && commit.author && commit.author.type === "Bot") {
+        const commitShas = new Set();
+        // Compare commits between before and after if valid basehead
+        if (pushPayload.before &&
+            pushPayload.before !== "0000000000000000000000000000000000000000") {
+            try {
+                for await (const response of octokit.paginate.iterator(octokit.rest.repos.compareCommitsWithBasehead, {
+                    ...reqArgs,
+                    basehead: `${pushPayload.before}...${pushPayload.after}`
+                })) {
+                    const page = response.data;
+                    const commits = Array.isArray(page)
+                        ? page
+                        : (page.commits ?? []);
+                    for (const commit of commits) {
+                        if (excludeBots === "true" &&
+                            commit.author &&
+                            commit.author.type === "Bot") {
+                            continue;
+                        }
+                        if (commit.sha) {
+                            commitShas.add(commit.sha);
+                        }
+                        if (commit.commit?.message) {
+                            closedIssues = [
+                                ...closedIssues,
+                                ...getClosedIssues(commit.commit.message)
+                            ];
+                        }
+                        if (!isForgejo && commit.sha) {
+                            try {
+                                const pullRequestsResponse = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+                                    ...reqArgs,
+                                    commit_sha: commit.sha
+                                });
+                                pullRequests = [
+                                    ...pullRequests,
+                                    ...pullRequestsResponse.data.map(pr => pr.number)
+                                ];
+                            }
+                            catch (prErr) {
+                                core.debug(`Could not fetch PRs for commit ${commit.sha}: ${prErr}`);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (err) {
+                core.warning(`Error comparing commits: ${err}`);
+            }
+        }
+        // Fallback: if no commit SHAs collected from compare, check push payload commits
+        if (commitShas.size === 0 && pushPayload.commits) {
+            for (const commit of pushPayload.commits) {
+                if (excludeBots === "true" &&
+                    (commit.author?.username?.includes("[bot]") ||
+                        commit.author?.name?.includes("[bot]"))) {
                     continue;
                 }
-                const pullRequestsResponse = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+                if (commit.id)
+                    commitShas.add(commit.id);
+                if (commit.message) {
+                    closedIssues = [...closedIssues, ...getClosedIssues(commit.message)];
+                }
+            }
+        }
+        // On Forgejo/Gitea, look up closed PRs and match their merge or head SHA
+        if (isForgejo && commitShas.size > 0) {
+            try {
+                const closedPRs = await octokit.rest.pulls.list({
                     ...reqArgs,
-                    commit_sha: commit.sha
+                    state: "closed",
+                    sort: "updated",
+                    direction: "desc",
+                    per_page: 100
                 });
-                pullRequests = [
-                    ...pullRequests,
-                    ...pullRequestsResponse.data.map(pr => pr.number)
-                ];
-                closedIssues = [
-                    ...closedIssues,
-                    ...getClosedIssues(commit.commit.message)
-                ];
+                for (const pr of closedPRs.data) {
+                    const forgejoPR = pr;
+                    const mergeSha = forgejoPR.merge_commit_sha;
+                    const headSha = forgejoPR.head?.sha;
+                    if ((mergeSha && commitShas.has(mergeSha)) ||
+                        (headSha && commitShas.has(headSha))) {
+                        pullRequests.push(pr.number);
+                    }
+                }
+            }
+            catch (err) {
+                core.warning(`Failed to fetch closed PRs on Forgejo: ${err}`);
             }
         }
         core.debug(`PRs: ${JSON.stringify(pullRequests)}`);
@@ -30038,23 +30112,39 @@ async function run() {
             ...new Set([...pullRequests, ...closedIssues])
         ];
         if (applyLabelOn.length === 0) {
+            core.info("No issues or pull requests found to label.");
             return;
         }
-        const existingLabels = (await octokit.rest.issues.listLabelsForRepo({ ...reqArgs })).data.map(l => l.name);
-        if (!existingLabels.includes(label)) {
-            await octokit.rest.issues.createLabel({
+        const existingLabels = await octokit.paginate(octokit.rest.issues.listLabelsForRepo, { ...reqArgs });
+        let labelObj = existingLabels.find(l => l.name.toLowerCase() === label.toLowerCase());
+        if (!labelObj) {
+            core.info(`Label "${label}" does not exist. Creating it...`);
+            const created = await octokit.rest.issues.createLabel({
                 ...reqArgs,
-                name: label
+                name: label,
+                color: label.includes("staging") ? "007bff" : "28a745"
             });
+            labelObj = created.data;
         }
         for (const issueOrPR of applyLabelOn) {
             core.info(`Applying label "${label}" on #${issueOrPR}`);
             try {
-                await octokit.rest.issues.addLabels({
-                    ...reqArgs,
-                    issue_number: issueOrPR,
-                    labels: [label]
-                });
+                if (isForgejo) {
+                    // Forgejo API expects array of label IDs
+                    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/labels", {
+                        ...reqArgs,
+                        issue_number: issueOrPR,
+                        labels: [labelObj.id]
+                    });
+                }
+                else {
+                    // GitHub API expects array of label names
+                    await octokit.rest.issues.addLabels({
+                        ...reqArgs,
+                        issue_number: issueOrPR,
+                        labels: [label]
+                    });
+                }
             }
             catch (error) {
                 if (error instanceof Error)
@@ -31979,8 +32069,7 @@ module.exports = parseParams
 /******/ 	}
 /******/ 	
 /************************************************************************/
-/******/ 	/* webpack/runtime/compat */
-/******/ 	
+/******/ 	/* webpack/runtime/asset-relocator-loader */
 /******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";
 /******/ 	
 /************************************************************************/
