@@ -1,23 +1,27 @@
 # Label When In Branch
 
-This is a Github action that can add a label to issues and PRs that are comitted
-to a branch.
+This is an action for GitHub and Forgejo/Gitea that adds a label to issues and
+pull requests committed to a specific branch.
 
 ## Use case
 
 My repo has a `staging` and a `production` branch. They are automatically
-deployed to Openshift via a webhook, respectively in the staging and the
+deployed to OpenShift via a webhook, respectively in the staging and the
 production environments.
 
 I want to label issues and pull requests with `deployed:staging` and
 `deployed:prod` respectively when the commits fixing the issues and the commits
-contained in the PRs land in the respective branches, to let the users and
-contributors know that the fix is coming.
+contained in the PRs land in the respective branches, to let users and
+contributors know that the fix is deployed.
 
 ## Usage
 
-Add an action file in your repo such as
-`.github/workflows/label-when-deployed.yaml` with the following content:
+The action will create the label if it does not exist yet. You can then edit its
+description and color in your repo settings.
+
+### GitHub Actions
+
+Add `.github/workflows/label-when-deployed.yaml`:
 
 ```yaml
 name: Apply labels when deployed
@@ -49,23 +53,64 @@ jobs:
           label: deployed:prod
 ```
 
-The action will create the label if it does not exist yet. You can then go and
-edit its description and color.
+### Forgejo & Gitea Actions
+
+Add `.forgejo/workflows/label-when-deployed.yaml`:
+
+```yaml
+name: Apply labels when deployed
+
+on:
+  push:
+    branches:
+      - stg
+      - prod
+
+jobs:
+  label:
+    name: Apply labels
+    runs-on: podman # or docker, depending on your runner configuration
+
+    steps:
+      - name: Staging deployment
+        uses: https://github.com/fedora-infra/label-when-in-branch@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: stg
+          label: deployed:staging
+
+      - name: Production deployment
+        uses: https://github.com/fedora-infra/label-when-in-branch@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: prod
+          label: deployed:prod
+```
+
+**Forgejo specifics:**
+
+- **Action source:** Forgejo requires the full URL
+  (`uses: https://github.com/...`) to fetch external actions from GitHub.
+- **Runner:** Use your instance's runner label (such as `podman` on Fedora
+  Forge, or `docker`).
+- **Token:** `${{ secrets.GITHUB_TOKEN }}` is automatically provided by the
+  Forgejo runner with write permissions.
 
 ## Options
 
-By default, issues and pull requests authored by bots will be ignored. This is
-because I assume bots do not care whether their work has been deployed, but I
-may be hurting their feelings by thinking that. If you want to label bots'
-issues and PRs, add the `exclude_bots: false` option to the `with:` block.
+- `branch`: The branch to match against (e.g. `staging`, `stg`, `prod`).
+- `label`: The label to apply (e.g. `deployed:staging`).
+- `token`: GitHub or Forgejo token (pass `${{ secrets.GITHUB_TOKEN }}`).
+- `exclude_bots`: Ignore bot commits (defaults to `true`).
+- `server_type`: Server platform (`auto`, `github`, or `forgejo`). Defaults to
+  `auto`, which automatically detects Forgejo/Gitea environments.
 
 ## Development
 
 This action is written in TypeScript. The TypeScript code is compiled into
-Javascript on commit using the `npm run on-commit` command, because Github only
-understands Javascript. You can use [pre-commit](https://pre-commit.com/) to do
-this build for you on commit, just install it and run `pre-commit install` in
-the repo.
+JavaScript on commit using the `npm run on-commit` command, because actions run
+compiled JavaScript directly. You can use [pre-commit](https://pre-commit.com/)
+to run this build on commit: `pre-commit install`.
 
 ## License
 
